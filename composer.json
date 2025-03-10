@@ -9,9 +9,10 @@
     "license": "MIT",
     "require": {
         "php": "^7.2.5|^8.0",
-        "google/cloud-speech": "1.0",
-        "guzzlehttp/guzzle": "^7.9",
         "fideloper/proxy": "^4.4",
+        "google/cloud-speech": "1.0",
+        "google/cloud-storage": "^1.30",
+        "guzzlehttp/guzzle": "^7.9",
         "laravel/framework": "^6.20.26",
         "laravel/tinker": "^2.5",
         "php-ffmpeg/php-ffmpeg": "^1.3"

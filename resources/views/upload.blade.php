@@ -145,8 +145,7 @@
               <h2>Audio File:</h2>
               <div class="card">
                   <div class="card-body">
-                      <audio controls style="width:100%;">
-                          <source id="audioSource" src="" type="audio/wav">
+                      <audio controls style="width:100%;" id="audioSource" src="">
                           Your browser does not support the audio element.
                       </audio>
                   </div>
