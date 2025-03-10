@@ -49,7 +49,7 @@ class AudioTranscriptionController extends Controller
 
             // Kembalikan respons JSON
             return response()->json([
-                'audioUrl' => $gcsUri,
+                'audioUrl' => 'https://storage.googleapis.com/' . env('GCS_BUCKET') . '/audio-files/' . basename($fullMp3Path),
                 'transcript' => $transcript,
                 'summary' => $summary,
             ]);
@@ -106,32 +106,6 @@ class AudioTranscriptionController extends Controller
         return "gs://" . env('GCS_BUCKET') . "/$objectName";
     }
 
-    // private function uploadFileToGCS($filePath, $objectName)
-    // {
-    //     $keyFilePath = base_path('bucket.json');
-
-    //     if (!file_exists($keyFilePath)) {
-    //         throw new \Exception('File kredensial tidak ditemukan: ' . $keyFilePath);
-    //     }
-
-    //     // Inisialisasi Google Cloud Storage client
-    //     $storage = new StorageClient([
-    //         'projectId' => env('GOOGLE_CLOUD_PROJECT'),
-    //         'keyFilePath' => $keyFilePath,
-    //     ]);
-
-    //     // Unggah file ke GCS
-    //     $bucket = $storage->bucket(env('GCS_BUCKET'));
-    //     $bucket->upload(fopen($filePath, 'r'), [
-    //         'name' => $objectName,
-    //     ]);
-
-    //     // URL file yang dapat diakses publik
-    //     $publicUrl = "https://storage.googleapis.com/" . env('GCS_BUCKET') . "/$objectName";
-
-    //     return $publicUrl;
-    // }
-
     private function transcribeAudio($audioUri)
     {
         set_time_limit(3600); // Set timeout menjadi 1 jam
@@ -145,6 +119,8 @@ class AudioTranscriptionController extends Controller
                 'encoding' => 'MP3', // Format audio (MP3)
                 'sampleRateHertz' => 16000,
                 'languageCode' => 'id-ID', // Bahasa
+                'enableAutomaticPunctuation' => true,
+                'model' => 'latest_long'
             ],
             'audio' => [
                 'uri' => $audioUri, // Gunakan URI GCS
