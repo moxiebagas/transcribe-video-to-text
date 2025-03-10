@@ -41,15 +41,29 @@ class AudioTranscriptionController extends Controller
             // Unggah file MP3 ke Google Cloud Storage (GCS)
             $gcsUri = $this->uploadFileToGCS($fullMp3Path, 'audio-files/' . basename($fullMp3Path));
 
-            // Transkripsi audio menggunakan Google Speech-to-Text API dengan URI GCS
-            $transcript = $this->transcribeAudio($gcsUri);
+            // Transkripsi audio panjang menggunakan metode asinkron
+            $operationName = $this->transcribeAudio($gcsUri);
+
+            // Periksa status transkripsi secara berkala
+            $transcript = '';
+            $isDone = false;
+            while (!$isDone) {
+                $operationStatus = $this->checkTranscriptionStatus($operationName);
+                if (isset($operationStatus['done']) && $operationStatus['done']) {
+                    $isDone = true;
+                    $transcript = $operationStatus['response']['results'][0]['alternatives'][0]['transcript'];
+                } else {
+                    sleep(5); // Tunggu 5 detik sebelum memeriksa lagi
+                }
+            }
 
             // Summarize hasil transkripsi menggunakan Cohere
             $summary = $this->summarizeTranscript($transcript);
 
             // Kembalikan respons JSON
             return response()->json([
-                'audioUrl' => 'https://storage.googleapis.com/' . env('GCS_BUCKET') . '/audio-files/' . basename($fullMp3Path),
+                'audioUrl' => "https://storage.googleapis.com/" . env('GCS_BUCKET') . "/audio-files/" . basename($fullMp3Path), // URL publik untuk memutar audio
+                'gcsUri' => $gcsUri, // URI GCS untuk transkripsi
                 'transcript' => $transcript,
                 'summary' => $summary,
             ]);
@@ -106,103 +120,82 @@ class AudioTranscriptionController extends Controller
         return "gs://" . env('GCS_BUCKET') . "/$objectName";
     }
 
-    private function transcribeAudio($audioUri)
+    private function transcribeAudio($gcsUri)
     {
-        set_time_limit(3600); // Set timeout menjadi 1 jam
-
-        // API key Anda
-        $apiKey = env('GCP_API_KEY'); // Ganti dengan API key Anda
-
-        // Data yang akan dikirim ke API
-        $data = [
-            'config' => [
-                'encoding' => 'MP3', // Format audio (MP3)
-                'sampleRateHertz' => 16000,
-                'languageCode' => 'id-ID', // Bahasa
-                'enableAutomaticPunctuation' => true,
-                'model' => 'latest_long'
-            ],
-            'audio' => [
-                'uri' => $audioUri, // Gunakan URI GCS
-            ],
-        ];
-
-        // Inisialisasi cURL
-        $ch = curl_init();
-
-        // Set URL dan opsi cURL
-        curl_setopt($ch, CURLOPT_URL, "https://speech.googleapis.com/v1/speech:longrunningrecognize?key=$apiKey");
-        curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json',
-        ]);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 3600); // Set timeout cURL
-
-        // Eksekusi cURL dan dapatkan respons
-        $response = curl_exec($ch);
-
-        // Periksa error cURL
-        if (curl_errno($ch)) {
-            throw new \Exception('Error cURL: ' . curl_error($ch));
+        // Pastikan URI GCS dalam format `gs://`
+        if (!str_starts_with($gcsUri, 'gs://')) {
+            throw new \Exception('URI GCS harus dalam format `gs://`.');
         }
 
-        // Tutup cURL
-        curl_close($ch);
+        $curl = curl_init();
 
-        // Decode respons JSON
+        curl_setopt_array($curl, array(
+            CURLOPT_URL => 'https://speech.googleapis.com/v1/speech:longrunningrecognize?key=' . env('GCP_API_KEY'),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_MAXREDIRS => 10,
+            CURLOPT_TIMEOUT => 0,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_POSTFIELDS => json_encode([
+                'config' => [
+                    'encoding' => 'MP3',
+                    'sampleRateHertz' => 16000,
+                    'languageCode' => 'id-ID',
+                    'enableAutomaticPunctuation' => true,
+                    'model' => 'latest_long', // Tetap gunakan model default
+                ],
+                'audio' => [
+                    'uri' => $gcsUri, // Gunakan URI GCS (`gs://`)
+                ],
+            ]),
+            CURLOPT_HTTPHEADER => array(
+                'Content-Type: application/json',
+            ),
+        ));
+
+        $response = curl_exec($curl);
+        curl_close($curl);
+
         $responseData = json_decode($response, true);
 
-        // Periksa apakah operasi berhasil dimulai
-        if (isset($responseData['name'])) {
-            return $this->checkOperationStatus($responseData['name']); // Periksa status operasi
-        } else {
+        if (isset($responseData['error'])) {
             throw new \Exception('Gagal memulai operasi. Respons API: ' . print_r($responseData, true));
         }
+
+        // Kembalikan nama operasi untuk memeriksa status transkripsi
+        return $responseData['name'];
     }
 
-    private function checkOperationStatus($operationName)
+    private function checkTranscriptionStatus($operationName)
     {
-        set_time_limit(3600); // Set timeout menjadi 1 jam
-
-        // API key Anda
-        $apiKey = env('GCP_API_KEY'); // Ganti dengan API key Anda
-
-        // Inisialisasi cURL
-        $ch = curl_init();
-
-        // Set URL dan opsi cURL
-        curl_setopt($ch, CURLOPT_URL, "https://speech.googleapis.com/v1/operations/$operationName?key=$apiKey");
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 3600); // Set timeout cURL
-
-        // Eksekusi cURL dan dapatkan respons
-        $response = curl_exec($ch);
-
-        // Periksa error cURL
-        if (curl_errno($ch)) {
-            throw new \Exception('Error cURL: ' . curl_error($ch));
-        }
-
-        // Tutup cURL
-        curl_close($ch);
-
-        // Decode respons JSON
+        $curl = curl_init();
+    
+        curl_setopt_array($curl, array(
+            CURLOPT_URL => 'https://speech.googleapis.com/v1/operations/' . $operationName . '?key=' . env('GCP_API_KEY'),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_MAXREDIRS => 10,
+            CURLOPT_TIMEOUT => 0,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => 'GET',
+            CURLOPT_HTTPHEADER => array(
+                'Content-Type: application/json',
+            ),
+        ));
+    
+        $response = curl_exec($curl);
+        curl_close($curl);
+    
         $responseData = json_decode($response, true);
-
-        // Periksa apakah operasi selesai
-        if (isset($responseData['done']) && $responseData['done']) {
-            if (isset($responseData['response']['results'][0]['alternatives'][0]['transcript'])) {
-                return $responseData['response']['results'][0]['alternatives'][0]['transcript'];
-            } else {
-                throw new \Exception('Tidak ada hasil transkripsi. Respons API: ' . print_r($responseData, true));
-            }
-        } else {
-            // Jika operasi belum selesai, tunggu dan periksa lagi
-            sleep(10); // Tunggu 10 detik sebelum memeriksa lagi
-            return $this->checkOperationStatus($operationName);
+    
+        if (isset($responseData['error'])) {
+            throw new \Exception('Gagal memeriksa status operasi: ' . print_r($responseData, true));
         }
+    
+        return $responseData;
     }
 
     private function summarizeTranscript($transcript)
